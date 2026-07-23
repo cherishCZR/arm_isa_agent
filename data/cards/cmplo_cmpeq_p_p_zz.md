@@ -1,0 +1,88 @@
+## CMPHI `[ALIAS]`
+_ARM A64 Instruction_ (Alias of cmpeq_p_p_zz.xml)
+
+**Title**: CMPLO (vectors) -- A64 | **Class**: `sve` | **XML ID**: `cmplo_cmpeq_p_p_zz`
+
+**Architecture**: `FEAT_SVE || FEAT_SME` (FEAT_SVE || FEAT_SME)
+
+**Summary**: Compare unsigned lower than vector, setting the condition flags
+
+**Description**:
+Compare active unsigned integer elements in the
+first source vector being lower than corresponding unsigned elements in the second source vector, and
+place the boolean results of the 
+comparison in the corresponding elements of the destination
+predicate.  Inactive elements in the destination predicate register are set to zero. Sets the First (N), None (Z), !Last (C)
+condition flags based on the predicate result,
+and the V flag to zero.
+
+**Attributes**: Predicated; DIT-sensitive (condition: `FEAT_SVE2 is implemented or FEAT_SME is implemented`)
+
+### Variant: `Higher`
+- **Assembly**: `CMPLO  <Pd>.<T>, <Pg>/Z, <Zm>.<T>, <Zn>.<T>`
+- **Alias of**: `CMPHI  <Pd>.<T>, <Pg>/Z, <Zn>.<T>, <Zm>.<T>`
+  Condition: Never
+**Encoding Diagram (32-bit)**:
+
+```text
+| 31  28  24 23  21 20  15 14 13 12   9   4  3  |
+|-----------------------------------------|
+| 001 0010 0   size 0   Zm  0   0   0   Pg  Zn  1   Pd  |
+```
+
+### Operands
+
+| Symbol | Type | Field | Description |
+|---|---|---|---|
+| `<Pd>` | `unknown` | `Pd` | Is the name of the destination scalable predicate register, encoded in the "Pd" field. |
+| `<T>` | `unknown` | `size` | Is the size specifier, |
+| `<Pg>` | `unknown` | `Pg` | Is the name of the governing scalable predicate register P0-P7, encoded in the "Pg" field. |
+| `<Zm>` | `register (128-bit)` | `Zm` | Is the name of the second source scalable vector register, encoded in the "Zm" field. |
+| `<Zn>` | `register (128-bit)` | `Zn` | Is the name of the first source scalable vector register, encoded in the "Zn" field. |
+
+**<T> Value Table**:
+
+| bitfield | symbol |
+|---|---|
+| 00 | B |
+| 01 | H |
+| 10 | S |
+| 11 | D |
+
+### Operational Notes
+
+If PSTATE.DIT is 1:
+        
+          
+            The execution time of this instruction is independent of:
+                
+                  The values of the data supplied in any of its operand registers when its governing predicate register contains the same value for each execution.
+                
+                
+                  The values of the NZCV flags.
+                
+              
+            
+          
+          
+            The response of this instruction to asynchronous exceptions does not vary based on:
+                
+                  The values of the data supplied in any of its operand registers when its governing predicate register contains the same value for each execution.
+                
+                
+                  The values of the NZCV flags.
+                
+              
+            
+          
+        
+        If FEAT_SME is implemented and the PE is in Streaming SVE mode, then any subsequent instruction which is dependent on the predicate register or NZCV condition flags written by this instruction might be significantly delayed.
+
+---
+<details><summary>Metadata</summary>
+
+- alias_mnemonic: `CMPLO`
+- isa: `A64`
+- sve-compare-type: `hi`
+- source: `cmplo_cmpeq_p_p_zz.xml`
+</details>

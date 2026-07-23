@@ -1,0 +1,120 @@
+## FMUL
+_ARM A64 Instruction_
+
+**Title**: FMUL (multiple and single vector) -- A64 | **Class**: `mortlach2` | **XML ID**: `fmul_mz_zzv`
+
+**Architecture**: `FEAT_SME2p2` (ARMv9.6)
+
+**Summary**: Multi-vector floating-point multiply by vector
+
+**Description**:
+This instruction multiplies all the floating-point elements of the two or four first source vectors with the
+corresponding elements of the second source vector and places
+the results in the corresponding elements of the two or four destination vectors.
+
+This instruction follows SME2 floating-point numerical behaviors
+corresponding to instructions that place their results in one or more
+SVE Z vectors.
+
+This instruction is unpredicated.
+
+**Attributes**: SM Policy: `SM_1_only`
+
+### Variant: `Two registers`
+- **Assembly**: `FMUL  { <Zd1>.<T>-<Zd2>.<T> }, { <Zn1>.<T>-<Zn2>.<T> }, <Zm>.<T>`
+**Encoding Diagram (32-bit)**:
+
+```text
+| 31 30  28  24 23  21 20  16 15   9   5  4   0 |
+|-----------------------------------------|
+| 1   10  0000 1   ?   1   Zm  0   111010 Zn  0   Zd  0   |
+```
+
+#### Decode (A64.sme.mortlach_multi_sve_5b.mortlach_multi2_fmul_sm.fmul_mz_zzv_2x1)
+
+```
+if !IsFeatureImplemented(FEAT_SME2p2) then EndOfDecode(Decode_UNDEF);
+constant integer esize = 8 << UInt(size);
+constant integer d = UInt(Zd:'0');
+constant integer n = UInt(Zn:'0');
+constant integer m = UInt('0':Zm);
+constant integer nreg = 2;
+```
+
+#### Execute (A64.sme.mortlach_multi_sve_5b.mortlach_multi2_fmul_sm.fmul_mz_zzv_2x1)
+
+```
+CheckStreamingSVEEnabled();
+constant integer VL = CurrentVL;
+constant integer elements = VL DIV esize;
+array [0..3] of bits(VL) results;
+
+for r = 0 to nreg-1
+    constant bits(VL) operand1 = Z[n+r, VL];
+    constant bits(VL) operand2 = Z[m, VL];
+    for e = 0 to elements-1
+        constant bits(esize) element1 = Elem[operand1, e, esize];
+        constant bits(esize) element2 = Elem[operand2, e, esize];
+        Elem[results[r], e, esize] = FPMul(element1, element2, FPCR);
+
+for r = 0 to nreg-1
+    Z[d+r, VL] = results[r];
+```
+
+### Variant: `Four registers`
+- **Assembly**: `FMUL  { <Zd1>.<T>-<Zd4>.<T> }, { <Zn1>.<T>-<Zn4>.<T> }, <Zm>.<T>`
+**Encoding Diagram (32-bit)**:
+
+```text
+| 31 30  28  24 23  21 20  16 15   9   6  5  4   1  0 |
+|-----------------------------------------------|
+| 1   10  0000 1   ?   1   Zm  1   111010 Zn  0   0   Zd  0   0   |
+```
+
+#### Decode (A64.sme.mortlach_multi_sve_5b.mortlach_multi4_fmul_sm.fmul_mz_zzv_4x1)
+
+```
+if !IsFeatureImplemented(FEAT_SME2p2) then EndOfDecode(Decode_UNDEF);
+constant integer esize = 8 << UInt(size);
+constant integer d = UInt(Zd:'00');
+constant integer n = UInt(Zn:'00');
+constant integer m = UInt('0':Zm);
+constant integer nreg = 4;
+```
+
+### Operands
+
+| Symbol | Type | Field | Description |
+|---|---|---|---|
+| `<Zd1>` | `register (128-bit)` | `Zd` | For the "Two registers" variant: is the name of the first scalable vector register of the destination multi-vector group, encoded as "Zd" times 2. |
+| `<Zd1>` | `register (128-bit)` | `Zd` | For the "Four registers" variant: is the name of the first scalable vector register of the destination multi-vector group, encoded as "Zd" times 4. |
+| `<T>` | `unknown` | `size` | Is the size specifier, |
+| `<Zd2>` | `register (128-bit)` | `Zd` | Is the name of the second scalable vector register of the destination multi-vector group, encoded as "Zd" times 2 plus 1. |
+| `<Zn1>` | `register (128-bit)` | `Zn` | For the "Two registers" variant: is the name of the first scalable vector register of the first source multi-vector group, encoded as "Zn" times 2. |
+| `<Zn1>` | `register (128-bit)` | `Zn` | For the "Four registers" variant: is the name of the first scalable vector register of the first source multi-vector group, encoded as "Zn" times 4. |
+| `<Zn2>` | `register (128-bit)` | `Zn` | Is the name of the second scalable vector register of the first source multi-vector group, encoded as "Zn" times 2 plus 1. |
+| `<Zm>` | `register (128-bit)` | `Zm` | Is the name of the second source scalable vector register Z0-Z15, encoded in the "Zm" field. |
+| `<Zd4>` | `register (128-bit)` | `Zd` | Is the name of the fourth scalable vector register of the destination multi-vector group, encoded as "Zd" times 4 plus 3. |
+| `<Zn4>` | `register (128-bit)` | `Zn` | Is the name of the fourth scalable vector register of the first source multi-vector group, encoded as "Zn" times 4 plus 3. |
+
+**<T> Value Table**:
+
+| bitfield | symbol |
+|---|---|
+| 01 | H |
+| 10 | S |
+| 11 | D |
+
+### Encoding Constraints
+_1× 🔒 FEATURE_GATE_
+
+| Type | Condition |
+|---|---|
+| 🔒 FEATURE_GATE | `IsFeatureImplemented(FEAT_SME2p2)` |
+
+---
+<details><summary>Metadata</summary>
+
+- isa: `A64`
+- source: `fmul_mz_zzv.xml`
+</details>

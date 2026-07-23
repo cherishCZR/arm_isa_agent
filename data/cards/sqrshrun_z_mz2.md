@@ -1,0 +1,80 @@
+## SQRSHRUN
+_ARM A64 Instruction_
+
+**Title**: SQRSHRUN -- A64 | **Class**: `sve2` | **XML ID**: `sqrshrun_z_mz2`
+
+**Architecture**: `FEAT_SME2 || FEAT_SVE2p1` (FEAT_SME2 || FEAT_SVE2p1)
+
+**Summary**: Signed saturating rounding shift right unsigned narrow by immediate and interleave
+
+**Description**:
+This instruction shifts right by an immediate value the signed integer value in each element of
+the two source vectors, and places the two-way interleaved rounded results
+in the half-width destination elements.
+Each result element is saturated to the half-width N-bit element's unsigned integer
+range 0 to (2N)-1.
+The immediate shift amount is an unsigned value in the range 1 to 16.
+
+This instruction is unpredicated.
+
+### Variant: `16-bit`
+- **Assembly**: `SQRSHRUN  <Zd>.H, { <Zn1>.S-<Zn2>.S }, #<const>`
+**Encoding Diagram (32-bit)**:
+
+```text
+| 31  28  24 23 22 21 20 19  15 14 13 12 11 10  9   5  4  |
+|-----------------------------------------------------|
+| 010 0010 1   1   0   1   1   imm4 0   0   0   0   1   0   Zn  0   Zd  |
+```
+
+#### Decode (A64.sve.sve_intx_narrowing.sve_intx_multi_shift_narrow.sqrshrun_z_mz2_)
+
+```
+if !IsFeatureImplemented(FEAT_SME2) && !IsFeatureImplemented(FEAT_SVE2p1) then
+    EndOfDecode(Decode_UNDEF);
+constant integer esize = 16;
+constant integer n = UInt(Zn:'0');
+constant integer d = UInt(Zd);
+constant integer shift = esize - UInt(imm4);
+```
+
+#### Execute (A64.sve.sve_intx_narrowing.sve_intx_multi_shift_narrow.sqrshrun_z_mz2_)
+
+```
+CheckSVEEnabled();
+constant integer VL = CurrentVL;
+constant integer elements = VL DIV (2 * esize);
+bits(VL) result;
+
+for e = 0 to elements-1
+    for i = 0 to 1
+        constant bits(VL) operand = Z[n+i, VL];
+        constant bits(2 * esize) element = Elem[operand, e, 2 * esize];
+        constant integer res = (SInt(element) + (1 << (shift-1))) >> shift;
+        Elem[result, 2*e + i, esize] = UnsignedSat(res, esize);
+
+Z[d, VL] = result;
+```
+
+#### Constraints
+_1× 🔒 FEATURE_GATE_
+
+| Type | Condition |
+|---|---|
+| 🔒 FEATURE_GATE | `IsFeatureImplemented(FEAT_SME2) \|\| IsFeatureImplemented(FEAT_SVE2p1)` |
+
+### Operands
+
+| Symbol | Type | Field | Description |
+|---|---|---|---|
+| `<Zd>` | `register (128-bit)` | `Zd` | Is the name of the destination scalable vector register, encoded in the "Zd" field. |
+| `<Zn1>` | `register (128-bit)` | `Zn` | Is the name of the first scalable vector register of the source multi-vector group, encoded as "Zn" times 2. |
+| `<Zn2>` | `register (128-bit)` | `Zn` | Is the name of the second scalable vector register of the source multi-vector group, encoded as "Zn" times 2 plus 1. |
+| `<const>` | `unknown` | `imm4` | Is the immediate shift amount, in the range 1 to 16, encoded in the "imm4" field. |
+
+---
+<details><summary>Metadata</summary>
+
+- isa: `A64`
+- source: `sqrshrun_z_mz2.xml`
+</details>

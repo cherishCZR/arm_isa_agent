@@ -1,0 +1,192 @@
+═══════════════════════════════════════════════════════════════════════════════════════
+                        ETL 数据流 — ARM ISA Knowledge Base
+═══════════════════════════════════════════════════════════════════════════════════════
+
+Data Source: ISA_A64_xml_A_profile-2025-03/  (~2000 XML 文件)
+Targets:     data/sqlite/isa_kb.db  +  data/chroma/
+
+═══════════════════════════════════════════════════════════════════════════════════════
+
+XML Directory (~2000 files)
+       │
+       ▼
+┌──────────────────────────────┐
+│ Stage 1: File Scanner        │
+│   etl/pipeline.py            │
+│   ├── glob("*.xml") 扫描文件  │
+│   ├── 按 A-Z 字母排序         │
+│   └── 排除 shared_pseudocode  │
+│       .xml (单独处理)          │
+└────────────┬─────────────────┘
+             ▼
+┌──────────────────────────────┐
+│ Stage 2: XML Parser          │
+│   etl/xml_parser.py          │
+│   ├── lxml.iterparse 流式解析│
+│   ├── 定位 <instructionsection>│
+│   ├── 解析 iclass/ps_section │
+│   ├── 提取 asmtemplate       │
+│   ├── 提取 regdiagram/box    │
+│   ├── 提取 arch_variants     │
+│   └── 输出: ParsedInstruction│
+│         (每指令一个 dict)     │
+└────────────┬─────────────────┘
+             ▼
+┌──────────────────────────────┐
+│ Stage 3: Constraint         │
+│          Extraction          │
+│   etl/constraint_extractor.py│
+│   ├── 解析 <constrained_     │
+│   │    unpredictables>       │
+│   ├── 解析 encoding-level    │
+│   │    constraints           │
+│   └── 输出: Constraint[]     │
+│         (type + expression)  │
+└────────────┬─────────────────┘
+             │
+             ├──────────────────────────┐
+             ▼                          ▼
+┌──────────────────────────┐  ┌──────────────────────────┐
+│ Stage 4a: SQLite Write   │  │ Stage 4b: Card Builder   │
+│   etl/pipeline.py        │  │   etl/instruction_card_  │
+│                          │  │   builder.py             │
+│   kb/sqlite/client.py    │  │                          │
+│   kb/sqlite/models.py    │  │   将 ParsedInstruction   │
+│                          │  │   → Markdown 格式的       │
+│   ┌────────────────────┐ │  │   Instruction Card:       │
+│   │ Table: instructions │ │  │                          │
+│   │ ────────────────── │ │  │   ┌──────────────────┐   │
+│   │ id (PK)            │ │  │   │ ## ADD (immediate)│   │
+│   │ name               │ │  │   │                   │   │
+│   │ mnemonic           │ │  │   │ **Instruction     │   │
+│   │ title              │ │  │   │  Class**: Data    │   │
+│   │ instr_class        │ │  │   │  Processing —     │   │
+│   │ is_alias           │ │  │   │  Immediate        │   │
+│   │ aliasto_id (FK)    │ │  │   │                   │   │
+│   │ description        │ │  │   │ **Summary**:      │   │
+│   │ architecture       │ │  │   │ Add (immediate)   │   │
+│   ├────────────────────┤ │  │   │ adds a register   │   │
+│   │ Table: encodings   │ │  │   │ value and an      │   │
+│   │ ────────────────── │ │  │   │ optionally-shifted│   │
+│   │ id (PK)            │ │  │   │ immediate value,  │   │
+│   │ instruction_id (FK)│ │  │   │ and writes the    │   │
+│   │ encoding_name      │ │  │   │ result to the     │   │
+│   │ bit_pattern        │ │  │   │ destination reg.  │   │
+│   │ bitfields (JSON)   │ │  │   │                   │   │
+│   │ asm_template       │ │  │   │ **Encoding**:     │   │
+│   │ width (32/64)      │ │  │   │ 32-bit: ...       │   │
+│   │ variant (A64/SIMD) │ │  │   │ 64-bit: ...       │   │
+│   ├────────────────────┤ │  │   │ **Example**:      │   │
+│   │ Table: operands    │ │  │   │ ADD W0, W1, #42   │   │
+│   │ ────────────────── │ │  │   │                   │   │
+│   │ id (PK)            │ │  │   │ **Notes**: ...    │   │
+│   │ encoding_id (FK)   │ │  │   └──────────────────┘   │
+│   │ symbol             │ │  │                          │
+│   │ type               │ │  └──────────┬───────────────┘
+│   │ width (bits)       │ │             ▼
+│   │ description        │ │  ┌──────────────────────────┐
+│   │ values (JSON)      │ │  │ Stage 4c: Embedding      │
+│   ├────────────────────┤ │  │   rag/embedding.py       │
+│   │ Table: features    │ │  │                          │
+│   │ ────────────────── │ │  │   sentence-transformers  │
+│   │ name (PK)          │ │  │   Card text → 1024d vec  │
+│   │ display_name       │ │  │   (BGE-M3 / E5 / ...)   │
+│   │ description        │ │  └──────────┬───────────────┘
+│   ├────────────────────┤ │             ▼
+│   │ Table: instr_feat  │ │  ┌──────────────────────────┐
+│   │ (M2M)              │ │  │ Stage 4d: ChromaDB Write │
+│   │ ────────────────── │ │  │   kb/chroma/client.py   │
+│   │ instruction_id (FK)│ │  │                          │
+│   │ feature_name (FK)  │ │  │   Collection:            │
+│   │ level              │ │  │   instruction_cards      │
+│   ├────────────────────┤ │  │                          │
+│   │ Table: constraints │ │  │   {                      │
+│   │ ────────────────── │ │  │     id: str,             │
+│   │ id (PK)            │ │  │     instruction_id: str, │
+│   │ instruction_id (FK)│ │  │     document: str,       │
+│   │ constraint_type    │ │  │     embedding: [1024],   │
+│   │ expression (JSON)  │ │  │     metadata: {          │
+│   ├────────────────────┤ │  │       mnemonic,          │
+│   │ Table: pseudocode  │ │  │       instr_class,       │
+│   │ ────────────────── │ │  │       architecture,      │
+│   │ id (PK)            │ │  │       features,          │
+│   │ instruction_id (FK)│ │  │       ...                │
+│   │ section_type       │ │  │     }                    │
+│   │ pseudocode_text    │ │  │   }                      │
+│   └────────────────────┘ │  └──────────────────────────┘
+└────────────┬─────────────┘
+             │
+             ▼
+┌──────────────────────────────┐
+│ Stage 5: Post-ETL (可选)     │
+│   ├── 索引构建 (B-tree / FTS) │
+│   ├── 数据校验 & 完整性检查    │
+│   └── 统计报告输出             │
+│       ├── 总指令数             │
+│       ├── 编码变体数           │
+│       ├── 操作数类型分布       │
+│       ├── Feature 覆盖率       │
+│       └── Constraint 数量      │
+└──────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════════════════════════════
+
+数据模型关系:
+
+  ┌─────────────┐
+  │ instructions │  (1 条 ARM 指令)
+  │ ─────────── │
+  │ id (PK)     │
+  │ name        │──── 1:N ────┐
+  │ mnemonic    │             │
+  │ title       │      ┌──────▼──────┐
+  │ instr_class │      │  encodings  │ (每条指令可能有多种编码)
+  │ is_alias    │      │ ─────────── │
+  │ aliasto_id ─┼─┐    │ id (PK)     │
+  └─────────────┘ │    │ instr_id(FK)│──── 1:N ────┐
+                  │    │ name        │             │
+                  │    │ bit_pattern │      ┌──────▼──────┐
+                  │    │ bitfields   │      │  operands   │ (每个编码有多个操作数)
+                  │    │ asm_template│      │ ─────────── │
+                  │    │ width       │      │ id (PK)     │
+                  │    └────────────┘      │ encoding_id  │
+                  │                        │ symbol      │
+                  │  M2M                   │ type        │
+                  │  ┌──────────────────┐  │ width       │
+                  │  │ instr_features   │  │ description │
+                  │  │ ─────────────── │  │ values      │
+                  │  │ instruction_id   │  └─────────────┘
+                  │  │ feature_name ────┼──▶ features (架构特性)
+                  │  │ level            │
+                  │  └──────────────────┘
+                  │
+                  │  1:N
+                  ├──────▶ constraints    (UNPREDICTABLE 约束)
+                  │        ├── id (PK)
+                  │        ├── instruction_id (FK)
+                  │        ├── constraint_type
+                  │        └── expression (JSON)
+                  │
+                  │  1:N
+                  └──────▶ pseudocode     (Decode/Execute 伪代码)
+                           ├── id (PK)
+                           ├── instruction_id (FK)
+                           ├── section_type
+                           └── pseudocode_text
+
+  ChromaDB:
+  ┌──────────────────────┐
+  │ instruction_cards    │  (每条指令的 Markdown 文档 + 向量)
+  │ ────────────────────│
+  │ id                   │
+  │ instruction_id (FK   │
+  │   → instructions.id) │
+  │ document (Markdown)  │
+  │ embedding ([1024d])  │
+  │ metadata (JSON):     │
+  │   ├── mnemonic       │
+  │   ├── instr_class    │
+  │   ├── architecture   │
+  │   ├── features       │
+  │   └── ...            │
+  └──────────────────────┘

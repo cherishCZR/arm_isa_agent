@@ -1,0 +1,31 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.mypy_cache/
+
+# JavaScript build artifacts and dependencies
+frontend/node_modules/
+frontend/.next/
+frontend/.git.local-backup/
+
+# Generated knowledge-base indexes and local test output
+data/chroma/
+data/bm25/
+data/sqlite/*.db
+data/reports/
+test_result/
+
+# Downloaded reference manuals and local logs
+*.pdf
+*.log
+
+# ARM release bundles also contain rendered XHTML reference pages.  The ETL
+# consumes the XML source files, so keep the repository focused on that input.
+ISA_A64_xml_A_profile-2025-03/**/xhtml/

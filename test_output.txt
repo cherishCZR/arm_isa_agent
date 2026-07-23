@@ -1,0 +1,90 @@
+============================================================
+Phase 8 — Compiler Verification Agent Integration Tests
+============================================================
+
+[Test 1] Verification Data Models
+  [PASS] CoverageBreakdown (overall avg, zero feature)
+  [PASS] StageResult
+  [PASS] VerificationReport (markdown + json export)
+  [PASS] VerificationReport (ERROR status)
+
+[Test 2] VerificationOrchestrator Full Pipeline
+2026-07-17 13:00:23 [info     ] sqlite.initialized             db_path=data/sqlite/isa_kb.db
+  [PASS] ADD profile found: ADD, complexity=8
+2026-07-17 13:00:23 [info     ] verification.start             instruction=ADD
+2026-07-17 13:00:23 [info     ] verification.retrieval_done    mnemonic=ADD
+2026-07-17 13:00:23 [info     ] verification.constraint_analysis_done details='1 encoding undefined'
+2026-07-17 13:00:23 [info     ] planner.profile_built          complexity=8 mnemonic=ADD
+2026-07-17 13:00:23 [info     ] planner.done                   dimensions=3 mnemonic=ADD tests=16
+2026-07-17 13:00:23 [info     ] verification.planning_done     dims=3
+2026-07-17 13:00:23 [info     ] verification.generation_done   total_tests=12
+2026-07-17 13:00:23 [info     ] review.start                   mnemonic=ADD total_tests=12 use_llm=False
+2026-07-17 13:00:23 [info     ] review.done                    high=1 issues=3 mnemonic=ADD passed=False score=91.0
+2026-07-17 13:00:23 [info     ] verification.review_done       issues=3 passed=False score=91.0
+2026-07-17 13:00:23 [info     ] verification.repair_skip       reason='no fixable issues'
+2026-07-17 13:00:23 [info     ] verification.complete          duration_ms=4.488700011279434 instruction=ADD score=91.0 status=FAIL tests=12
+  Status: FAIL
+  Generated Tests: 12
+  Review Score: 91/100
+  Review Passed: False
+  Repair Attempts: 0
+  Coverage: normal=100% boundary=80% encoding=40% alias=0% invalid=0% feature=100%
+  Issues: 3
+  Stages: 6 (total 4ms)
+    - retrieval: ok (2ms)
+    - constraint_analysis: ok (0ms)
+    - test_planning: ok (2ms)
+    - test_generation: ok (0ms)
+    - test_review: warning (0ms)
+    - repair: skipped (0ms)
+  [PASS] Full pipeline completed all 5 stages
+  [PASS] Markdown report generated (5075 chars)
+
+[Test 3] run_verification() Convenience Function
+2026-07-17 13:00:23 [info     ] verification.start             instruction=SUB
+2026-07-17 13:00:23 [info     ] verification.retrieval_done    mnemonic=SUB
+2026-07-17 13:00:23 [info     ] verification.constraint_analysis_done details='1 encoding undefined'
+2026-07-17 13:00:23 [info     ] planner.profile_built          complexity=8 mnemonic=SUB
+2026-07-17 13:00:23 [info     ] planner.done                   dimensions=3 mnemonic=SUB tests=16
+2026-07-17 13:00:23 [info     ] verification.planning_done     dims=3
+2026-07-17 13:00:23 [info     ] verification.generation_done   total_tests=12
+2026-07-17 13:00:23 [info     ] review.start                   mnemonic=SUB total_tests=12 use_llm=False
+2026-07-17 13:00:23 [info     ] review.done                    high=2 issues=4 mnemonic=SUB passed=False score=83.5
+2026-07-17 13:00:23 [info     ] verification.review_done       issues=4 passed=False score=83.5
+2026-07-17 13:00:23 [info     ] verification.repair_attempt    attempt=1
+2026-07-17 13:00:23 [info     ] repair.start                   issues=4 mnemonic=SUB
+2026-07-17 13:00:23 [warning  ] verification.repair_not_possible attempt=1
+2026-07-17 13:00:23 [info     ] verification.complete          duration_ms=12.557600013678893 instruction=SUB score=83.5 status=FAIL tests=12
+  [PASS] SUB verification: status=FAIL, tests=12, score=84
+
+[Test 4] API Request/Response Schemas
+  [PASS] GenerateTestcaseRequest
+  [PASS] GenerateTestcaseResponse
+  [PASS] HealthResponse
+  [PASS] BatchGenerateRequest
+
+[Test 5] FastAPI App Factory
+2026-07-17 13:00:23 [info     ] api.services_set
+{'event': 'api.services_set', 'logger': 'arm_isa_agent.api.deps', 'level': 'info', 'timestamp': '2026-07-17T05:00:23.768087Z'}
+  [PASS] App created with 3 API paths: ['/api/health', '/api/generate_testcase', '/api/generate_testcases']
+
+[Test 6] AgentState Verification Field
+  [PASS] AgentState includes verification_report field
+
+[Test 7] Multi-Instruction Pipeline
+{'instruction': 'LDR', 'event': 'verification.start', 'logger': 'arm_isa_agent.verification.orchestrator', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.536245Z'}
+{'mnemonic': 'LDR', 'event': 'verification.retrieval_done', 'logger': 'arm_isa_agent.verification.orchestrator', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.547726Z'}
+{'mnemonic': 'LDR', 'complexity': 10, 'event': 'planner.profile_built', 'logger': 'arm_isa_agent.planning.planner', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.550039Z'}
+{'mnemonic': 'LDR', 'dimensions': 7, 'tests': 30, 'event': 'planner.done', 'logger': 'arm_isa_agent.planning.planner', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.550192Z'}
+{'dims': 7, 'event': 'verification.planning_done', 'logger': 'arm_isa_agent.verification.orchestrator', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.550351Z'}
+{'total_tests': 44, 'event': 'verification.generation_done', 'logger': 'arm_isa_agent.verification.orchestrator', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.550846Z'}
+{'mnemonic': 'LDR', 'total_tests': 44, 'use_llm': False, 'event': 'review.start', 'logger': 'arm_isa_agent.review_generation.reviewer', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.550899Z'}
+{'mnemonic': 'LDR', 'score': 93.0, 'passed': False, 'issues': 2, 'high': 1, 'event': 'review.done', 'logger': 'arm_isa_agent.review_generation.reviewer', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.551134Z'}
+{'passed': False, 'score': 93.0, 'issues': 2, 'event': 'verification.review_done', 'logger': 'arm_isa_agent.verification.orchestrator', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.551175Z'}
+{'reason': 'no fixable issues', 'event': 'verification.repair_skip', 'logger': 'arm_isa_agent.verification.orchestrator', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.551211Z'}
+{'instruction': 'LDR', 'status': 'FAIL', 'score': 93.0, 'tests': 44, 'duration_ms': 15.17299999250099, 'event': 'verification.complete', 'logger': 'arm_isa_agent.verification.orchestrator', 'level': 'info', 'timestamp': '2026-07-17T05:00:42.551364Z'}
+  [OK] LDR: status=FAIL, tests=44, score=93, duration=15ms
+
+============================================================
+All tests passed! Compiler Verification Agent is ready.
+============================================================

@@ -1,0 +1,136 @@
+arm_isa_agent/
+│
+├── pyproject.toml                     # 项目元数据 + 依赖 (PEP 621)
+├── Makefile                           # 常用命令快捷方式
+├── Dockerfile                         # 容器化部署
+├── docker-compose.yml                 # 本地开发环境
+├── .env.example                       # 环境变量模板
+├── .gitignore
+├── .pre-commit-config.yaml            # Pre-commit hooks
+├── README.md                          # 项目说明
+├── LICENSE
+│
+├── 目录结构.txt                       # 本文件
+├── 模块划分与职责.md                   # 模块职责详细说明
+├── 总体架构图.txt                      # 系统分层架构
+├── 对话查询数据流.txt                  # Agent 对话数据流
+├── ETL数据流.txt                      # ETL 管道数据流
+│
+├── data/                              # ★ 数据目录 (gitignored)
+│   ├── raw/                           #   ARM XML 原始数据 (symlink/copy)
+│   ├── sqlite/
+│   │   └── isa_kb.db                 #   SQLite 知识库 (ETL 产物)
+│   └── chroma/
+│       └── chroma.sqlite3            #   ChromaDB 持久化
+│
+├── docs/                              # 文档
+│   ├── architecture.md                #   架构设计文档
+│   ├── api.md                         #   API 文档补充
+│   └── development.md                 #   开发指南
+│
+├── scripts/                           # 运维脚本
+│   └── etl_full.sh                    #   全量 ETL 执行脚本
+│
+├── tests/                             # 测试目录
+│   ├── conftest.py                    #   全局 fixtures
+│   ├── verify_testgen.py              #   测试生成验证
+│   ├── verify_reviewer.py             #   Reviewer 验证
+│   ├── verify_phase8.py               #   Phase 8 Compiler Verification 集成验证
+│   └── unit/
+│       ├── test_etl_xml_parser.py
+│       ├── test_etl_field_extractor.py
+│       ├── test_kb_sqlite_repo.py
+│       ├── test_kb_chroma_repo.py
+│       ├── test_tools_search.py
+│       └── test_agent_planner.py
+│
+└── src/arm_isa_agent/                # ★ 主源码包
+    │
+    ├── __init__.py                    # 版本号导出
+    ├── py.typed                       # PEP 561 类型标记
+    │
+    ├── core/                          # ─── 核心基础设施 ───
+    │   ├── __init__.py
+    │   ├── config.py                  #   pydantic-settings 全局配置
+    │   ├── constants.py               #   枚举常量 (InstructionClass / OperandType 等)
+    │   ├── exceptions.py              #   统一异常层级
+    │   └── models/                    #   领域模型
+    │       ├── __init__.py
+    │       └── instruction.py         #     Instruction, Encoding, Operand, Feature 等
+    │
+    ├── etl/                           # ─── ETL 管道 ───
+    │   ├── __init__.py
+    │   ├── pipeline.py                #   Pipeline 编排器 (Orchestrator)
+    │   ├── xml_parser.py              #   XML → ParsedInstruction (lxml 流式解析)
+    │   ├── constraint_extractor.py    #   约束提取 (CONSTRAINED UNPREDICTABLE)
+    │   └── instruction_card_builder.py #  Instruction Card (Markdown) 构建
+    │
+    ├── kb/                            # ─── 双知识库 ───
+    │   ├── __init__.py
+    │   ├── sqlite/
+    │   │   ├── __init__.py
+    │   │   ├── client.py             #     SQLAlchemy 引擎 & Session
+    │   │   └── models.py             #     ORM 模型 (7 张核心表 + M2M)
+    │   └── chroma/
+    │       ├── __init__.py
+    │       └── client.py             #     ChromaDB 客户端 + Collection 管理
+    │
+    ├── agent/                         # ─── LangGraph Agent 运行时 ───
+    │   ├── __init__.py
+    │   ├── graph.py                   #   StateGraph 编译：Router→Planner→Executor→[Reviewer⇄Repair]→Summarizer
+    │   ├── state.py                   #   AgentState TypedDict (含 verification_report 字段)
+    │   ├── tool_registry.py           #   工具注册中心 (@register_tool) + OpenAI function schema
+    │   └── prompt_manager.py          #   Prompt 模板管理 (System Prompt + Few-shot)
+    │
+    ├── tools/                         # ─── 工具适配层 (Agent ↔ 领域模块桥梁) ───
+    │   ├── __init__.py
+    │   ├── retrieval.py               #   知识检索工具 (语义搜索 + 结构化查询)
+    │   ├── planning.py                #   测试规划工具 (generate_test_plan)
+    │   ├── testgen.py                 #   测试生成工具 (generate_testcase_from_plan)
+    │   ├── generation.py              #   代码生成工具
+    │   ├── review.py                  #   代码 Review 工具
+    │   └── review_gen.py              #   测试 Review 工具
+    │
+    ├── generation/                    # ─── 测试生成领域逻辑 (Phase 6) ───
+    │   ├── __init__.py
+    │   ├── models.py                  #   TestCaseSuite, TestCase, ASMCall 等数据模型
+    │   ├── prompts.py                 #   生成 Prompt 模板
+    │   └── generators.py              #   规则生成器 + LLM 辅助生成器
+    │
+    ├── planning/                      # ─── 测试计划领域逻辑 (Phase 5) ───
+    │   ├── __init__.py
+    │   ├── models.py                  #   TestPlan, TestDimension, Strategy 模型
+    │   ├── prompts.py                 #   规划 Prompt 模板
+    │   ├── planner.py                 #   测试方案规划器
+    │   └── analyzer.py               #   指令 Profile 分析器
+    │
+    ├── rag/                           # ─── RAG 检索领域逻辑 (Phase 4) ───
+    │   ├── __init__.py
+    │   ├── pipeline.py                #   检索管道编排 (混合检索)
+    │   ├── retriever.py               #   检索器抽象 + 实现
+    │   ├── bm25.py                    #   BM25 稀疏检索
+    │   └── embedding.py               #   Embedding 密集检索
+    │
+    ├── review_generation/             # ─── Review + Self-Correction 领域逻辑 (Phase 7) ───
+    │   ├── __init__.py
+    │   ├── models.py                  #   ReviewResult (5 维评分), ReviewIssue
+    │   ├── prompts.py                 #   Review / Repair Prompt 模板
+    │   └── reviewer.py                #   TestcaseReviewer + RepairGenerator
+    │
+    ├── verification/                  # ─── Compiler Verification 流水线 (Phase 8) ───
+    │   ├── __init__.py
+    │   ├── models.py                  #   VerificationReport, CoverageBreakdown, StageResult
+    │   └── orchestrator.py            #   VerificationOrchestrator: 7 阶段完整流水线
+    │
+    ├── api/                           # ─── FastAPI 接口层 ───
+    │   ├── __init__.py
+    │   ├── app.py                     #   FastAPI app 工厂 (create_app)
+    │   ├── deps.py                    #   依赖注入 (set_services / get_sqlite / get_llm)
+    │   ├── schemas.py                 #   请求/响应 Pydantic Schema
+    │   └── routes/
+    │       ├── __init__.py
+    │       └── verification.py        #   POST /api/generate_testcase + /api/generate_testcases + /api/health
+    │
+    └── cli/                           # ─── CLI 命令行工具 ───
+        ├── __init__.py
+        └── main.py                    #   入口 (arm-isa)

@@ -1,0 +1,222 @@
+═══════════════════════════════════════════════════════════════════════════════════════
+                        对话查询数据流 — ARM ISA Copilot Agent
+═══════════════════════════════════════════════════════════════════════════════════════
+
+模式 1: 标准知识检索 (retrieval / agentic_search intent)
+──────────────────────────────────────────────────────────────
+
+User Query: "ADD 指令的 SIMD 版本有哪些编码变体？"
+       │
+       ▼
+┌──────────────────────────────────────────────────────────┐
+│                    LangGraph Agent                        │
+│                                                          │
+│  [Router] ──▶ 意图分类: "retrieval"                     │
+│       │     (prompt_manager.py 提供 Intent Prompt)       │
+│       ▼                                                  │
+│  [Planner] ──▶ Plan (LLM 生成):                          │
+│       │         Step 1: search_instruction("ADD SIMD")    │
+│       │         Step 2: get_encoding(results[0])          │
+│       │         Step 3: explain_operand("<Vd>.<T>")      │
+│       ▼                                                  │
+│  [Executor] ──▶ Tool Calling Loop (遍历 plan)            │
+│       │      (tool_registry.py 路由 → tools/*.py)        │
+│       │                                                  │
+│       ├─── Tool: search_instruction ──▶ tools/retrieval.py
+│       │         │                                       │
+│       │         ▼                                       │
+│       │    ┌──────────────────────────────┐            │
+│       │    │ rag/pipeline.py              │            │
+│       │    │  混合检索: BM25 + Embedding   │            │
+│       │    │    ├── bm25.py (关键词召回)   │            │
+│       │    │    ├── embedding.py (语义召回)│            │
+│       │    │    └── retriever.py (融合排序)│            │
+│       │    └────────────┬─────────────────┘            │
+│       │                 │                               │
+│       │    ┌────────────▼─────────────────┐            │
+│       │    │ kb/                           │            │
+│       │    │  ChromaDB: instruction_cards  │ (语义)     │
+│       │    │  SQLite: instructions 表      │ (精确)     │
+│       │    └──────────────────────────────┘            │
+│       │    → [ADD_advsimd, ADD_vector, ADD_sve, ...]   │
+│       │                                                  │
+│       ├─── Tool: get_encoding("ADD_advsimd")             │
+│       │         │                                       │
+│       │         ▼                                       │
+│       │    kb/sqlite/models.py                          │
+│       │    SELECT * FROM encodings                       │
+│       │    JOIN instructions ON ...                     │
+│       │    WHERE mnemonic='ADD' AND class='advsimd'     │
+│       │    → [{bitfields, asm_template, bit_pattern}, ...]│
+│       │                                                  │
+│       └─── Tool: explain_operand("<Vd>.<T>")             │
+│                 │                                       │
+│                 ▼                                       │
+│            kb/sqlite/models.py                          │
+│            SELECT * FROM operands WHERE symbol='Vd'     │
+│            → {type, width, value_table, constraints}    │
+│       ▼                                                  │
+│  [Summarizer] ──▶ 汇总 tool_results，LLM 合成回答        │
+│       │           prompt_manager.py: summary_system_msg  │
+│       ▼                                                  │
+└──────────────────────────────────────────────────────────┘
+       │
+       ▼
+  最终返回:
+  {
+    "answer": "ADD 的 SIMD 版本有以下编码变体：\n1. ADD_advsimd ...\n2. ADD_vector ...\n3. ADD_sve ...",
+    "iterations": 4,
+    "tool_results": [...],
+    "verification_report": {}
+  }
+
+
+模式 2: 测试生成 + Self-Correction (test_generation / verification intent)
+────────────────────────────────────────────────────────────────────────────
+
+User Query: "为 ADD 指令生成测试用例" (或 implicit verification 请求)
+       │
+       ▼
+┌──────────────────────────────────────────────────────────┐
+│                    LangGraph Agent                        │
+│                                                          │
+│  [Router] ──▶ 意图分类: "verification"                  │
+│       │                                                  │
+│       ▼                                                  │
+│  [Planner] ──▶ Plan:                                     │
+│       │         Step 1: generate_test_plan("ADD")        │
+│       │         Step 2: generate_testcase_from_plan(...) │
+│       ▼                                                  │
+│  [Executor] ──▶                                        │
+│       │                                                  │
+│       ├─── generate_test_plan("ADD")                     │
+│       │    → tools/planning.py                          │
+│       │      ┌─────────────────────────┐               │
+│       │      │ planning/planner.py     │               │
+│       │      │  → TestPlan (dimensions │               │
+│       │      │    + priorities)        │               │
+│       │      └─────────────────────────┘               │
+│       │                                                  │
+│       └─── generate_testcase_from_plan(plan)             │
+│            → tools/testgen.py                           │
+│              ┌─────────────────────────┐               │
+│              │ generation/generators.py│               │
+│              │  → TestCaseSuite        │               │
+│              │    (8 种格式 × N 条用例) │               │
+│              └─────────────────────────┘               │
+│       ▼                                                  │
+│  ┌──────────────────────────────────────────────────┐    │
+│  │ [Reviewer] ──▶ 5 维评分 (syntax/semantics/       │    │
+│  │    │           format/boundary/consistency)       │    │
+│  │    │                                              │    │
+│  │    │  tools/review_gen.py → review_generation/    │    │
+│  │    │    reviewer.py::TestcaseReviewer             │    │
+│  │    │                                              │    │
+│  │    ▼                                              │    │
+│  │  ┌──────────────┐                                 │    │
+│  │  │ score >= 80? │──Yes──→ [Summarizer]           │    │
+│  │  └──────┬───────┘                                 │    │
+│  │         │No                                       │    │
+│  │         ▼                                         │    │
+│  │  [Repair] ──▶ tools/review_gen.py                │    │
+│  │    │  review_generation/reviewer.py::RepairGenerator│  │
+│  │    │  (自动修复 → 回到 Reviewer, max 3 loops)     │    │
+│  │    └───────────────────────────────────────────── │    │
+│  └──────────────────────────────────────────────────┘    │
+│       ▼                                                  │
+│  [Summarizer] ──▶ 输出包含 review_results + score       │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+       │
+       ▼
+  最终返回:
+  {
+    "answer": "ADD 测试生成完成。Review Score: 91/100 ...",
+    "review_results": [
+      { "dimension": "syntax", "score": 95, "issues": [] },
+      { "dimension": "semantics", "score": 90, "issues": [...] },
+      ...
+    ],
+    "verification_report": {}
+  }
+
+
+模式 3: Compiler Verification 全流程 (verification orchestrator)
+───────────────────────────────────────────────────────────────────
+
+User Request: POST /api/generate_testcase {"instruction": "ADD"}
+       │
+       ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  api/routes/verification.py                                       │
+│    generate_testcase(request) → deps.get_services()              │
+└────────────────────────────┬─────────────────────────────────────┘
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  verification/orchestrator.py::VerificationOrchestrator           │
+│    run_pipeline(instruction="ADD")                                │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐ │
+│  │ Stage 1: Instruction Retrieval                              │ │
+│  │   rag/retriever.py → kb/sqlite/ + kb/chroma/                │ │
+│  │   获取 InstructionProfile (mnemonic, class, features, ...)  │ │
+│  ├─────────────────────────────────────────────────────────────┤ │
+│  │ Stage 2: Constraint Analysis                                │ │
+│  │   planning/analyzer.py::ProfileAnalyzer                     │ │
+│  │   分析 immediate 约束 / feature 依赖 / UNPREDICTABLE 条件   │ │
+│  ├─────────────────────────────────────────────────────────────┤ │
+│  │ Stage 3: Test Planning                                      │ │
+│  │   planning/planner.py::TestPlanner                          │ │
+│  │   生成 TestStrategy: dimensions + priority + allocation     │ │
+│  ├─────────────────────────────────────────────────────────────┤ │
+│  │ Stage 4: Test Generation                                    │ │
+│  │   generation/generators.py                                  │ │
+│  │   生成 TestCaseSuite: 8 种格式 × 分配数量                   │ │
+│  ├─────────────────────────────────────────────────────────────┤ │
+│  │ Stage 5: Test Review                                        │ │
+│  │   review_generation/reviewer.py::TestcaseReviewer           │ │
+│  │   5 维评分 → ReviewResult (score, issues)                  │ │
+│  ├─────────────────────────────────────────────────────────────┤ │
+│  │ Stage 6: Repair Loop (max 3)                                │ │
+│  │   Loop:                                                     │ │
+│  │   ├─ score >= threshold? → break                           │ │
+│  │   ├─ review_generation/reviewer.py::RepairGenerator        │ │
+│  │   └─ back to Stage 5                                       │ │
+│  ├─────────────────────────────────────────────────────────────┤ │
+│  │ Stage 7: Build Report                                       │ │
+│  │   → VerificationReport (JSON + Markdown)                    │ │
+│  │     { instruction, generated_tests, coverage,               │ │
+│  │       review_score, stages, issues }                       │ │
+│  └─────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────┘
+       │
+       ▼
+  HTTP Response:
+  {
+    "instruction": "ADD",
+    "status": "passed",
+    "generated_tests": 20,
+    "coverage": {
+      "boundary": 100,
+      "alias": 80,
+      "invalid": 100
+    },
+    "review_score": 91,
+    "stages": [...],
+    "issues": [],
+    "report_markdown": "..."
+  }
+
+
+═══════════════════════════════════════════════════════════════════════════════════════
+                    关键路径总结
+═══════════════════════════════════════════════════════════════════════════════════════
+
+  简单问答:
+    User → Router(LLM) → Planner(LLM) → Executor(tools) → Summarizer(LLM) → Answer
+
+  Self-Correction 生成:
+    User → ... → Executor(Generate) → Reviewer(LLM) ⇄ Repair(LLM) → Summarizer → Answer
+
+  Compiler Verification:
+    User → POST API → Orchestrator → [Retrieve→Analyze→Plan→Generate→Review⇄Repair] → Report
