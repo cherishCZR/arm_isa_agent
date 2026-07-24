@@ -92,6 +92,7 @@ class VerificationOrchestrator:
         self._generator: Optional[TestCaseSuiteGenerator] = None
         self._reviewer: Optional[TestcaseReviewer] = None
         self._repairer: Optional[RepairGenerator] = None
+        self._verification_graph: Any = None
 
     # ── Lazy component initialization ──────────────────────────
 
@@ -125,6 +126,15 @@ class VerificationOrchestrator:
             self._repairer = RepairGenerator(self._llm, max_repair_attempts=MAX_REPAIR_ATTEMPTS)
         return self._repairer
 
+    @property
+    def verification_graph(self) -> Any:
+        """Lazy LangGraph control plane around deterministic verification."""
+        if self._verification_graph is None:
+            from arm_isa_agent.verification.graph import VerificationGraphRunner
+
+            self._verification_graph = VerificationGraphRunner(orchestrator=self)
+        return self._verification_graph
+
     # ── Main pipeline ──────────────────────────────────────────
 
     def verify(
@@ -144,10 +154,10 @@ class VerificationOrchestrator:
         Returns:
             VerificationReport with coverage, score, issues, and stage timing.
         """
-        return self._verify_single_instruction_program(
+        return self.verification_graph.run(
             instruction,
             use_llm=use_llm,
-            program_instruction_count=instruction_count,
+            instruction_count=instruction_count,
             target_instruction_count=target_instruction_count,
         )
 
@@ -1052,7 +1062,7 @@ class VerificationOrchestrator:
                 instruction=instruction,
             ))
         report = await asyncio.to_thread(
-            self._verify_single_instruction_program,
+            self.verify,
             instruction,
             use_llm,
             instruction_count,

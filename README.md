@@ -30,7 +30,8 @@ ARM XML release.
   Clang. Verification is compile-only; it does not claim runtime execution on
   QEMU or hardware.
 - Includes a LangGraph-based tool-use agent for interactive ISA questions and
-  RAG-backed analysis.
+  RAG-backed analysis, plus a LangGraph verification control plane for request
+  normalization, conditional validation gates, bounded LLM retries, and traces.
 
 ## Verification Model
 
@@ -62,6 +63,8 @@ flowchart LR
 
   RAG --> Agent[LangGraph tool-use agent]
   SQLite --> Agent
+  UI --> VerifyGraph[LangGraph verification control plane]
+  VerifyGraph --> Generate
 ```
 
 ## XML Taxonomy Coverage

@@ -18,11 +18,16 @@ __all__ = [
     "CoverageBreakdown",
     "StageResult",
     "VerificationOrchestrator",
+    "VerificationGraphRunner",
     "run_verification",
 ]
 
 
 def __getattr__(name: str):
+    if name == "VerificationGraphRunner":
+        from arm_isa_agent.verification.graph import VerificationGraphRunner
+
+        return VerificationGraphRunner
     if name in {"VerificationOrchestrator", "run_verification"}:
         from arm_isa_agent.verification.orchestrator import VerificationOrchestrator, run_verification
 
