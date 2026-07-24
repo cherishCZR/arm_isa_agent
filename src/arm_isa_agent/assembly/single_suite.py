@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import random
-from typing import Any
+from typing import Any, Callable
 
 from arm_isa_agent.assembly.instantiator import AssemblyInstantiator
 from arm_isa_agent.assembly.scenario import make_assembly_symbol
@@ -38,13 +38,23 @@ class SingleInstructionSuite:
 class SingleInstructionSuiteGenerator:
     """Generate XML-applicable, exact-budget files for one instruction."""
 
-    def __init__(self, sqlite_client: Any, seed: int | None = None) -> None:
+    def __init__(
+        self,
+        sqlite_client: Any,
+        seed: int | None = None,
+        progress_callback: Callable[[str, str, str, dict[str, Any]], None] | None = None,
+    ) -> None:
         self._resolver = InstructionResolver(sqlite_client)
         self._analyzer = InstructionAnalyzer(sqlite_client)
         self._instantiator = AssemblyInstantiator(seed=seed)
         self._compiler = CompileVerifier()
         self._rng = random.Random(seed)
         self._probe_cache: dict[tuple[str, str], bool] = {}
+        self._progress_callback = progress_callback
+
+    def _progress(self, stage: str, event: str, message: str, **snapshot: Any) -> None:
+        if self._progress_callback is not None:
+            self._progress_callback(stage, event, message, snapshot)
 
     def generate_and_verify(
         self,
@@ -53,6 +63,8 @@ class SingleInstructionSuiteGenerator:
         target_instruction_count: int,
     ) -> SingleInstructionSuite:
         suite = SingleInstructionSuite(query=query)
+        self._progress("planner", "start", "Planning XML-derived single-instruction scenarios", program_instruction_count=program_instruction_count, target_instruction_count=target_instruction_count)
+        self._progress("llm", "complete", "LLM generation disabled; using XML rule-based scenario generation", status="skipped")
         if program_instruction_count < 1 or target_instruction_count < 1:
             self._issue(suite, "invalid_budget", "Instruction counts must be positive integers", query)
             return suite
@@ -60,13 +72,16 @@ class SingleInstructionSuiteGenerator:
             self._issue(suite, "invalid_budget", "Total instruction budget must reserve at least one non-target instruction", query)
             return suite
 
+        self._progress("retrieval", "start", "Resolving XML instruction variant")
         resolution = self._resolver.resolve(query)
         if not resolution.selected_xml_id:
             self._issue(suite, "resolution_error", f"Could not resolve instruction query: {query}", query)
+            self._progress("retrieval", "complete", "Instruction resolution failed", status="error")
             return suite
         profile = self._analyzer.extract_profile(xml_id=resolution.selected_xml_id)
         if profile is None:
             self._issue(suite, "resolution_error", f"Could not load XML profile: {resolution.selected_xml_id}", query)
+            self._progress("retrieval", "complete", "XML instruction profile could not be loaded", status="error")
             return suite
 
         suite.profile = profile
@@ -82,8 +97,11 @@ class SingleInstructionSuiteGenerator:
         specs = self._plan(profile)
         suite.trace.append(f"Resolved {query} to {profile.xml_id}")
         suite.trace.append(f"Planned {len(specs)} XML-applicable compile-only scenarios")
+        self._progress("retrieval", "complete", f"Resolved {query} to {profile.xml_id}", status="ok", xml_id=profile.xml_id)
+        self._progress("planner", "complete", f"Planned {len(specs)} XML-applicable scenarios", status="ok", scenario_count=len(specs))
+        self._progress("generator", "start", "Generating exact-budget scenario programs", scenario_count=len(specs))
 
-        for spec in specs:
+        for index, spec in enumerate(specs, start=1):
             file_entry, plan_entry, issues = self._build_file(
                 query, profile, spec, program_instruction_count, target_instruction_count,
             )
@@ -91,9 +109,20 @@ class SingleInstructionSuiteGenerator:
             suite.issues.extend(issues)
             if file_entry is not None:
                 suite.test_files.append(file_entry)
+            self._progress("generator", "progress", f"Generated scenario {index}/{len(specs)}: {spec.category}", scenario=spec.category, generated_files=len(suite.test_files))
 
         reviewable = [entry for entry in suite.test_files if entry["status"] == "pass"]
+        self._progress("generator", "complete", f"Generated {len(suite.test_files)} scenario program file(s)", status="ok" if suite.test_files else "error")
+        static_failed = sum(1 for entry in suite.test_files if entry["status"] == "fail")
+        self._progress("reviewer", "start", "Reviewing instruction budgets and target occurrences")
+        self._progress("reviewer", "complete", "Static review passed" if not static_failed else "Static review found issues", status="ok" if not static_failed else "error", issue_count=len(suite.issues))
+        self._progress("compiler", "start", f"Compiling {len(reviewable)} generated file(s)")
         suite.compile_summary = self._compiler.verify_files(reviewable)
+        self._progress(
+            "compiler", "complete",
+            f"Compile-only validation: {suite.compile_summary.passed}/{suite.compile_summary.total} files passed",
+            status="ok" if suite.compile_summary.status == "PASS" else "error" if suite.compile_summary.status == "FAIL" else "skipped",
+        )
         compile_by_id = {result.file_id: result for result in suite.compile_summary.results}
         for entry in suite.test_files:
             result = compile_by_id.get(entry["file_id"])

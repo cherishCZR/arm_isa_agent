@@ -16,12 +16,13 @@ from langgraph.graph import END, START, StateGraph
 
 from arm_isa_agent.verification.graph_state import VerificationGraphEvent, VerificationGraphState
 from arm_isa_agent.verification.models import VerificationReport
+from arm_isa_agent.verification.progress import ProgressCallback
 
 if TYPE_CHECKING:
     from arm_isa_agent.verification.orchestrator import VerificationOrchestrator
 
 
-CoreVerification = Callable[[str, bool, int, int], VerificationReport]
+CoreVerification = Callable[..., VerificationReport]
 
 
 class VerificationGraphRunner:
@@ -33,6 +34,7 @@ class VerificationGraphRunner:
         core_verify: CoreVerification | None = None,
         checkpointer: Any | None = None,
         max_llm_retries: int = 1,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
         if core_verify is None:
             if orchestrator is None:
@@ -40,6 +42,7 @@ class VerificationGraphRunner:
             core_verify = orchestrator._verify_single_instruction_program
         self._core_verify = core_verify
         self._max_llm_retries = max(0, max_llm_retries)
+        self._progress_callback = progress_callback
         self._graph = self._build_graph(checkpointer or MemorySaver())
 
     def run(
@@ -138,6 +141,7 @@ class VerificationGraphRunner:
     def _normalize_request(self, state: VerificationGraphState) -> dict[str, Any]:
         raw = state.get("instruction", "").strip()
         normalized = raw if state.get("use_llm", False) else raw.upper()
+        self._publish("planner", "start", "Normalizing verification request", instruction=normalized)
         return {
             "normalized_instruction": normalized,
             "events": [self._event("normalize_request", "completed", "Normalized verification request", state, instruction=normalized)],
@@ -155,6 +159,7 @@ class VerificationGraphRunner:
             state.get("use_llm", False),
             state.get("instruction_count", 100),
             state.get("target_instruction_count", 1),
+            progress_callback=self._progress_callback,
         )
         return {
             "report": report,
@@ -200,11 +205,13 @@ class VerificationGraphRunner:
 
     def _repair(self, state: VerificationGraphState) -> dict[str, Any]:
         retry_count = state.get("retry_count", 0) + 1
+        self._publish("llm", "progress", "Retrying LLM generation after validation failure", retry_count=retry_count)
         report = self._core_verify(
             state.get("normalized_instruction", state.get("instruction", "")),
             True,
             state.get("instruction_count", 100),
             state.get("target_instruction_count", 1),
+            progress_callback=self._progress_callback,
         )
         return {
             "retry_count": retry_count,
@@ -232,3 +239,7 @@ class VerificationGraphRunner:
             f"LangGraph {event['node']}: {event['message']}" for event in events
         )
         report.budget.setdefault("langgraph", {"thread_id": thread_id, "events": events})
+
+    def _publish(self, stage: str, event: str, message: str, **snapshot: Any) -> None:
+        if self._progress_callback is not None:
+            self._progress_callback(stage, event, message, snapshot)

@@ -633,6 +633,7 @@ class VerificationOrchestrator:
         use_llm: bool = False,
         program_instruction_count: int = 100,
         target_instruction_count: int = 1,
+        progress_callback: Any = None,
     ) -> VerificationReport:
         """Verify one instruction using XML scenario suites or LLM assembly generation."""
         if not use_llm:
@@ -640,6 +641,7 @@ class VerificationOrchestrator:
                 instruction,
                 program_instruction_count=program_instruction_count,
                 target_instruction_count=target_instruction_count,
+                progress_callback=progress_callback,
             )
         t_start = time.perf_counter()
         raw = instruction.strip()
@@ -653,7 +655,12 @@ class VerificationOrchestrator:
 
         t_retrieval = time.perf_counter()
         try:
-            generator = ScenarioProgramGenerator(self._sqlite, seed=1, llm=self._llm)
+            generator = ScenarioProgramGenerator(
+                self._sqlite,
+                seed=1,
+                llm=self._llm,
+                progress_callback=progress_callback,
+            )
             program = generator.generate_and_verify(
                 ScenarioRequest(
                     scenario_id=safe_id,
@@ -804,6 +811,7 @@ class VerificationOrchestrator:
         instruction: str,
         program_instruction_count: int,
         target_instruction_count: int,
+        progress_callback: Any = None,
     ) -> VerificationReport:
         """Generate a multi-file XML-derived suite for single-instruction rule mode."""
         started = time.perf_counter()
@@ -811,7 +819,7 @@ class VerificationOrchestrator:
         if not raw:
             return self._error_report(instruction, "Instruction is empty", [])
 
-        generator = SingleInstructionSuiteGenerator(self._sqlite, seed=1)
+        generator = SingleInstructionSuiteGenerator(self._sqlite, seed=1, progress_callback=progress_callback)
         suite = generator.generate_and_verify(raw, program_instruction_count, target_instruction_count)
         profile = suite.profile
         files = suite.test_files
@@ -989,7 +997,7 @@ class VerificationOrchestrator:
             error=error,
         )
 
-    async def verify_stream(
+    async def _verify_stream_replay_legacy(
         self,
         instruction: str,
         use_llm: bool = False,
@@ -1637,6 +1645,106 @@ class VerificationOrchestrator:
             tests=suite.total_tests if suite else 0,
             duration_ms=total_ms,
         )
+
+    async def verify_stream(
+        self,
+        instruction: str,
+        use_llm: bool = False,
+        instruction_count: int = 100,
+        target_instruction_count: int = 1,
+    ) -> AsyncGenerator[str, None]:
+        """Stream verification progress while the graph executes in a worker thread."""
+        from arm_isa_agent.verification.graph import VerificationGraphRunner
+        from arm_isa_agent.verification.progress import AsyncProgressBridge, ProgressEvent
+
+        normalized_instruction = instruction.strip() if use_llm else instruction.strip().upper()
+        loop = asyncio.get_running_loop()
+        bridge = AsyncProgressBridge(loop)
+        runner = VerificationGraphRunner(orchestrator=self, progress_callback=bridge.publish)
+        task = asyncio.create_task(asyncio.to_thread(
+            runner.run,
+            normalized_instruction,
+            use_llm,
+            instruction_count,
+            target_instruction_count,
+        ))
+
+        def emit_progress(event: ProgressEvent) -> str:
+            if event.event == "start":
+                return self._sse("stage_start", SSEStageStart(
+                    stage=event.stage,
+                    message=event.message,
+                    instruction=normalized_instruction,
+                ))
+            if event.event == "progress":
+                return self._sse("stage_progress", SSEStageProgress(
+                    stage=event.stage,
+                    detail=event.message,
+                    instruction=normalized_instruction,
+                ))
+            return self._sse("stage_complete", SSEStageComplete(
+                stage=event.stage,
+                status=str(event.snapshot.get("status", "ok")),  # type: ignore[arg-type]
+                duration_ms=float(event.snapshot.get("duration_ms", 0.0)),
+                summary=event.message,
+                snapshot=event.snapshot,
+                instruction=normalized_instruction,
+            ))
+
+        try:
+            while not task.done():
+                event = await bridge.next()
+                if event is not None:
+                    yield emit_progress(event)
+            report = await task
+        except Exception as exc:
+            logger.exception("verification.stream.graph_failed", instruction=normalized_instruction)
+            yield self._sse("stage_complete", SSEStageComplete(
+                stage="planner",
+                status="error",
+                duration_ms=0.0,
+                summary=f"Verification graph failed: {str(exc)[:160]}",
+                instruction=normalized_instruction,
+            ))
+            yield self._sse("done", {"error": str(exc)[:300]})
+            return
+
+        for event in bridge.drain():
+            yield emit_progress(event)
+
+        coverage = report.coverage
+        yield self._sse("result", SSEResult(
+            instruction=report.instruction,
+            status=report.status,
+            review_score=report.review_score,
+            total_tests=report.generated_tests,
+            passing_tests=report.passing_test_count,
+            failing_tests=report.failing_test_count,
+            total_duration_ms=report.total_duration_ms,
+            stage_details=[detail.model_dump() for detail in report.stage_details],
+            test_files=[test_file.model_dump() for test_file in report.test_files],
+            coverage={
+                "normal": coverage.normal,
+                "boundary": coverage.boundary,
+                "encoding": coverage.encoding,
+                "alias": coverage.alias,
+                "invalid": coverage.invalid,
+                "feature": coverage.feature,
+                "overall": coverage.overall,
+            },
+            issues=report.issues,
+            verification_level=report.verification_level,
+            generated_status=report.generated_status,
+            static_review_status=report.static_review_status,
+            compile_status=report.compile_status,
+            compile_results=[result.model_dump() for result in report.compile_results],
+            generation_mode=report.generation_mode,
+            generation_trace=report.generation_trace,
+            budget=report.budget,
+            required_features=report.required_features,
+            canonical_targets=report.canonical_targets,
+        ))
+        yield self._sse("done", {})
 
     async def verify_batch_stream(
         self,
